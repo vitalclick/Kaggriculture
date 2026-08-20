@@ -11,8 +11,16 @@ different point:
     strawberry / milk / wool collapse to the $1 floor inside ~50 units
 
 So the plan is melons for raw value, geese for eggs + fertilizer, and wheat as
-bulk filler that doubles as animal feed. Strawberry, tomato, milk and wool are
-never planted: their markets are too thin to repay a tile.
+bulk filler that doubles as animal feed. Strawberry and tomato are never
+planted: their markets are too thin to repay a tile.
+
+A thin market is not the same as a worthless one, though. Wool is finished as a
+commodity past ~50 units, but the first 23 sell at an average of ~$190 -- the
+richest per-unit price in the game -- so exactly two sheep are worth ~$7.4k on
+a $1k outlay. Two is the whole opportunity: a third sheep floods wool and costs
+more than it earns, and cows are worse still, losing money outright by taking
+pasture and labour that sheep and melons use better. The livestock targets are
+therefore small, deliberate, and measured rather than guessed.
 
 Geese are the quiet engine. Every surviving animal has `fertilizer_available`
 set at each end-of-day refresh regardless of CARE, so a goose yields 1 free
@@ -58,7 +66,21 @@ CROPS = {
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
 
 MARKET_I0 = 10000
-GOOSE_COST = 300
+
+# Livestock is priced per animal, not per species. Wool and milk saturate fast
+# (wool is worthless past ~50 units), but the first few animals sell into the
+# richest part of the curve: one sheep returns ~$4.4k of wool on a $500 bird,
+# one cow ~$2.9k of milk on $400. `target` is where the marginal animal stops
+# paying for its tile and its ~4 actions a day.
+ANIMALS = {
+    "GOOSE": {"cost": 300, "structure": "COOP",    "product": "EGG",  "first": 4, "target": 8},
+    "SHEEP": {"cost": 500, "structure": "PASTURE", "product": "WOOL", "first": 6, "target": 2},
+    "COW":   {"cost": 400, "structure": "PASTURE", "product": "MILK", "first": 8, "target": 0},
+}
+# Most valuable per animal first, so a labour-limited farm buys the best ones.
+ANIMAL_ORDER = ("SHEEP", "GOOSE", "COW")
+STRUCTURES = ("COOP", "PASTURE")
+BUILD_OP = {"COOP": "BUILD_COOP", "PASTURE": "BUILD_PASTURE"}
 
 MARKET_PARAMS = {
     "WHEAT":      {"base":  25, "T": 400, "bf": "sqrt",   "bt": 0.80, "af": "log",    "at": 0.20},
@@ -112,12 +134,11 @@ LAST_DAY = 29
 MELON_PLANT_CUTOFF = 10     # melon needs 10 days from planting to first yield
 WHEAT_PLANT_CUTOFF = 5
 CARROT_PLANT_CUTOFF = 4
-GOOSE_BUY_CUTOFF = 7        # 4 days to first yield, so still ~3 productive days
+ANIMAL_BUY_MARGIN = 3       # productive days an animal must still have left
 FEED_CUTOFF = 1             # production at end of the penultimate day still sells
 CARE_CUTOFF = 2
 
 MELON_TILES = 22
-GOOSE_TARGET = 8
 MAX_HANDS = 14
 HIRES_PER_TURN = 5
 
@@ -228,7 +249,8 @@ def _plan(obs, cfg=None):
     melon_cutoff = last_day - MELON_PLANT_CUTOFF
     wheat_cutoff = last_day - WHEAT_PLANT_CUTOFF
     carrot_cutoff = last_day - CARROT_PLANT_CUTOFF
-    goose_cutoff = last_day - GOOSE_BUY_CUTOFF
+    def animal_cutoff(a):
+        return last_day - ANIMALS[a]["first"] - ANIMAL_BUY_MARGIN
     feed_cutoff = last_day - FEED_CUTOFF
     care_cutoff = last_day - CARE_CUTOFF
 
@@ -241,8 +263,9 @@ def _plan(obs, cfg=None):
         return min(access, key=lambda t: dist(pos, t))
 
     # ---- read the farm ----------------------------------------------------
-    plants, animals, free_coops, weeds, empties = [], [], [], [], []
-    n_coops = 0
+    plants, animals, weeds, empties = [], [], [], []
+    free_struct = {s: [] for s in STRUCTURES}
+    n_struct = {s: 0 for s in STRUCTURES}
     melon_tiles = 0
     for y in range(board):
         row = tiles[y]
@@ -260,18 +283,24 @@ def _plan(obs, cfg=None):
                 plants.append((x, y, t))
                 if t.get("crop") == "MELON":
                     melon_tiles += 1
-            elif kind in ("COOP", "PASTURE"):
-                if kind == "COOP":
-                    n_coops += 1
+            elif kind in STRUCTURES:
+                n_struct[kind] += 1
                 if t.get("animal"):
                     animals.append((x, y, t))
-                elif kind == "COOP":
-                    free_coops.append((x, y))
+                else:
+                    free_struct[kind].append((x, y))
 
     n_animals = len(animals)
-    geese_in_shed = shed.get("GOOSE", 0)
-    carried_geese = sum(i.get("GOOSE", 0) for i in invs)
-    geese_owned = n_animals + geese_in_shed + carried_geese
+    carried = {a: sum(i.get(a, 0) for i in invs) for a in ANIMALS}
+    placed = {a: 0 for a in ANIMALS}
+    for _, _, t in animals:
+        if t.get("animal") in placed:
+            placed[t["animal"]] += 1
+    owned = {a: placed[a] + shed.get(a, 0) + carried[a] for a in ANIMALS}
+    # Sheep and cows share pastures, so vacancy is counted per structure.
+    in_hand_struct = {s: 0 for s in STRUCTURES}
+    for a, ad in ANIMALS.items():
+        in_hand_struct[ad["structure"]] += shed.get(a, 0) + carried[a]
     shed_load = sum(v for v in shed.values() if v > 0)
 
     # ---- labour plan -------------------------------------------------------
@@ -292,11 +321,32 @@ def _plan(obs, cfg=None):
     # wheat next (replanted every 4 days), melons furthest out (watered only).
     empties.sort(key=lambda p: dist(p, to_shed(p)))
 
-    coop_deficit = 0
-    if day <= goose_cutoff:
-        coop_deficit = max(0, min(GOOSE_TARGET, geese_owned + 5) - n_coops)
-    coop_slots = empties[:coop_deficit]
-    rest = empties[coop_deficit:]
+    # Livestock costs roughly 5 actions a day each once walking is counted.
+    # Never own more than the crew can service: an animal that misses two
+    # feeds escapes and takes its purchase price with it. Non-binding at the
+    # default day length, but it stops a farm with very short days from
+    # buying a flock it can only starve.
+    # Sized on the crew the farm can grow into, not today's, so the early ramp
+    # is not throttled while hands are still being hired.
+    animal_cap = max(0, int((MAX_HANDS + 1) * turns_per_day * 0.30 / 5.0))
+    targets, spare = {}, animal_cap
+    for a in ANIMAL_ORDER:
+        targets[a] = min(ANIMALS[a]["target"], spare)
+        spare -= targets[a]
+
+    # Build housing just ahead of the animals we can afford, so tiles are not
+    # tied up in empty structures.
+    want_struct = {s: 0 for s in STRUCTURES}
+    for a, ad in ANIMALS.items():
+        if day <= animal_cutoff(a):
+            want_struct[ad["structure"]] += min(targets[a], owned[a] + 4)
+    struct_slots, taken = [], 0
+    for s in STRUCTURES:
+        for _ in range(max(0, want_struct[s] - n_struct[s])):
+            if taken < len(empties):
+                struct_slots.append((empties[taken], s))
+                taken += 1
+    rest = empties[taken:]
 
     # Never take on more tiles than the crew can water. A field we cannot keep
     # up with does not just yield less, it dies and leaves a weed behind.
@@ -383,15 +433,21 @@ def _plan(obs, cfg=None):
             orders.append(["BUY_LAND"])
             cash -= cost
 
-    if day <= goose_cutoff:
-        # Only buy birds we have somewhere to put, so cash never sits dead in
-        # the shed as unsellable livestock.
-        room = len(free_coops) + len(coop_slots) - geese_in_shed - carried_geese
-        want = min(GOOSE_TARGET - geese_owned, room, 3)
-        want = min(want, max(0, int((cash - GOOSE_BUFFER) // GOOSE_COST)))
+    # Only buy animals we have somewhere to put: livestock cannot be sold, so
+    # a bird stuck in the shed is cash burned outright.
+    for a in ANIMAL_ORDER:
+        ad = ANIMALS[a]
+        if day > animal_cutoff(a):
+            continue
+        s = ad["structure"]
+        vacancies = (len(free_struct[s]) + sum(1 for _, ss in struct_slots if ss == s)
+                     - in_hand_struct[s])
+        want = min(targets[a] - owned[a], vacancies, 3)
+        want = min(want, max(0, int((cash - GOOSE_BUFFER) // ad["cost"])))
         if want > 0:
-            orders.append(["BUY_ANIMAL", "GOOSE", want])
-            cash -= want * GOOSE_COST
+            orders.append(["BUY_ANIMAL", a, want])
+            cash -= want * ad["cost"]
+            in_hand_struct[s] += want
 
     # Top up feed if the farm cannot grow enough wheat for the flock.
     if n_animals > 0 and day <= feed_cutoff:
@@ -469,8 +525,10 @@ def _plan(obs, cfg=None):
 
     for x, y, t in animals:
         yu = t.get("yield_units", 0)
-        product = "EGG"
-        if yu >= 2 or (winddown and yu >= 1):
+        product = ANIMALS.get(t.get("animal"), ANIMALS["GOOSE"])["product"]
+        # Wool and milk are worth enough that a single unit justifies the trip;
+        # eggs are better collected in pairs.
+        if yu * px(product) >= 150 or yu >= 2 or (winddown and yu >= 1):
             add(yu * px(product) + 20, (x, y), ["HARVEST"])
         if t.get("fertilizer_available", False):
             # One action for a unit of fertilizer, which is the best-paying
@@ -480,10 +538,13 @@ def _plan(obs, cfg=None):
             add(px(product) * 0.9, (x, y), ["CARE"])
 
     if not endgame:
-        for x, y in free_coops:
-            add(650, (x, y), ["PLACE", "GOOSE"], need="GOOSE")
-        for x, y in coop_slots:
-            add(240, (x, y), ["BUILD_COOP"])
+        for s in STRUCTURES:
+            for x, y in free_struct[s]:
+                for a, ad in ANIMALS.items():
+                    if ad["structure"] == s and carried[a] > 0:
+                        add(650, (x, y), ["PLACE", a], need=a)
+        for pos, s in struct_slots:
+            add(240, pos, [BUILD_OP[s]])
         # Planting with the day nearly over risks the seed dying unwatered.
         if hour <= turns_per_day - 3:
             for x, y, crop in plant_plan:
@@ -536,10 +597,10 @@ def _plan(obs, cfg=None):
     if wheat_gap > 0:
         dispatch_pickup("WHEAT", wheat_gap, 2)
 
-    placeable = min(geese_in_shed, len(free_coops))
-    goose_gap = max(0, placeable - carried_geese)
-    if goose_gap > 0:
-        dispatch_pickup("GOOSE", goose_gap, 2)
+    for a, ad in ANIMALS.items():
+        gap = min(shed.get(a, 0), len(free_struct[ad["structure"]])) - carried[a]
+        if gap > 0:
+            dispatch_pickup(a, gap, 2)
 
     # Greedy over value per action: a job worth V that costs d steps to walk to
     # plus one step to perform yields V / (1 + d) per action spent.

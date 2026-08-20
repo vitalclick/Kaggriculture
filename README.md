@@ -19,12 +19,18 @@ very different point:
 | Fertilizer | $9.0k | $21.0k | Free byproduct of livestock |
 | Egg | $4.4k | $12.6k | Very flat curve, large capacity |
 | Wheat | $2.2k | $6.3k | Effectively unlimited; also animal feed |
-| Strawberry / milk / wool | — | — | Collapse inside ~50 units |
+| Wool | — | — | Dead past ~50 units, but the first 23 average ~$190 |
+| Strawberry / milk | — | — | Collapse inside ~50 units |
 
 So the farm grows **melons** for raw value, keeps a small flock of **geese**
-for eggs and fertilizer, and fills the remaining tiles with **wheat**, which
-doubles as feed. Strawberry, tomato, milk and wool are never planted — their
-markets are too thin to repay a tile.
+for eggs and fertilizer, runs exactly **two sheep**, and fills the remaining
+tiles with **wheat**, which doubles as feed. Strawberry and tomato are never
+planted — their markets are too thin to repay a tile.
+
+A thin market is not a worthless one. Wool is finished as a commodity past ~50
+units, but the first 23 sell at an average of ~$190, the best per-unit price in
+the game, so two sheep return ~$7.4k on a $1k outlay. Two is the entire
+opportunity — see the tuning notes.
 
 Two details drive most of the score:
 
@@ -50,9 +56,9 @@ Measured over a fixed seed set with the default configuration:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 12W–0L | $78,916 (range $75.7k–$81.6k) |
-| `random` | 8W–0L | $78,605 |
-| itself (self-play) | symmetric | ~$37k each |
+| `starter` | 12W–0L | $91,109 (range $88.8k–$93.6k) |
+| `random` | 6W–0L | $89,846 |
+| itself (self-play) | symmetric | ~$51k each |
 
 Self-play scores roughly halve because both farms drain the same market, which
 is the realistic ladder condition.
@@ -61,6 +67,9 @@ Tuning notes worth keeping, since several were counter-intuitive:
 
 - Goose target: 8 birds beat 12 (+$4.6k), 16 (+$14k) and 20. More geese eat
   labour that melons pay better for, and eggs/fertilizer saturate.
+- Sheep are worth +$11.8k, but *only* at exactly two. One is worth +$3k, three
+  is worth −$2k against no sheep at all, and the 2-vs-3 distributions do not
+  overlap across 12 seeds. Cows lose money at any count and are set to zero.
 - Planting into the final days *loses* money — those actions are worth more
   spent harvesting and collecting fertilizer.
 - An over-generous crew formula cost ~70% of the score by running into the
@@ -80,7 +89,11 @@ print([s['reward'] for s in env.steps[-1]])
 ```
 
 Runtime is ~0.5 ms per turn (max 1.6 ms) against the environment's 1-second
-`actTimeout`. `agent` is deliberately the **last** callable defined in
+`actTimeout`. All configurations in the robustness sweep win except a
+`turnsPerDay=6` season, where days are too short to walk to livestock and back;
+the competition fixes `turnsPerDay` at 24, so this is not tuned for.
+
+`agent` is deliberately the **last** callable defined in
 `main.py`: the kaggle-environments loader resolves a file agent by taking the
 last callable in the module, so defining it last is what makes its crash guard
 the entry point that actually runs.
