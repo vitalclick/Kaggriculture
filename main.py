@@ -1,45 +1,48 @@
 """Kaggriculture competition agent.
 
-Strategy is driven by the market's revenue curves. Selling N units of a product
-earns sum(price(k)) for k in 0..N-1, and each product's curve saturates at a
-different point:
+Strategy is driven by the market, but the market has two forces, not one.
+Selling N units earns sum(price(k)) and pushes the price down; meanwhile the
+town drains inventory every turn and pulls it back up. Only the net matters,
+and the town is by far the bigger term:
 
-    melon        100 units -> $21.7k, 150 -> $26.4k, then flat (price hits $1)
-    fertilizer   100 units -> $9.0k,  300 -> $21.0k
-    egg          100 units -> $4.4k,  500 -> $20.5k
-    wheat        100 units -> $2.2k,  500 -> $10.3k
-    strawberry / milk / wool collapse to the $1 floor inside ~50 units
+    product      shops   town drain / season   base
+    wheat          5              ~635          $25
+    strawberry     4              ~536         $120
+    carrot/milk    2-3            ~437     $35/$160
+    tomato/egg     2              ~338      $60/$50
+    wool           1 (x2)         ~338         $200
+    MELON          0              ~140         $250
 
-So the plan is melons for raw value, geese for eggs + fertilizer, and wheat as
-bulk filler that doubles as animal feed. Strawberry and tomato are never
-planted: their markets are too thin to repay a tile.
+Melon is the one product no shop demands -- only the town centre touches it --
+so it is the one market a farm can genuinely flood. That is why its tile budget
+is capped rather than maximised: past roughly 20 tiles the extra melons sell
+into a price this farm itself has crushed.
 
-A thin market is not the same as a worthless one, though. Wool is finished as a
-commodity past ~50 units, but the first 23 sell at an average of ~$190 -- the
-richest per-unit price in the game -- so exactly two sheep are worth ~$7.4k on
-a $1k outlay. Two is the whole opportunity: a third sheep floods wool and costs
-more than it earns, and cows are worse still, losing money outright by taking
-pasture and labour that sheep and melons use better. The livestock targets are
-therefore small, deliberate, and measured rather than guessed.
+The plan is therefore melons up to that cap, wheat as filler that doubles as
+animal feed, and pasture livestock for the premium goods. Cows and sheep beat
+geese by a wide margin: milk and wool have real shop demand behind them and
+trade *above* base all season (~$210-280 milk, ~$240 wool), while eggs sit near
+$50. Per animal-day a cow returns ~$375 and a sheep ~$326 against a goose's
+~$120, for the same ~4 actions of feeding, care and collection.
 
-Geese are the quiet engine. Every surviving animal has `fertilizer_available`
-set at each end-of-day refresh regardless of CARE, so a goose yields 1 free
-fertilizer per day on top of its eggs. Fed and cared for, it produces 2 eggs a
-day (1 base + 1 banked care bonus, since a goose's production interval is 1).
-That is roughly $3k of output over the season against a $300 purchase price --
-provided it is actually fed. A goose that misses two consecutive days escapes
-and the $300 is gone.
+Every surviving animal also has `fertilizer_available` set at each end-of-day
+refresh regardless of CARE, so each one yields a free fertilizer daily on top
+of its product. A goose that misses two consecutive feeds escapes and takes its
+purchase price with it, so feeding is never allowed to slip.
 
-Melons are the best crop per action: ~10 actions over an 11-day cycle for 6
-units worth ~$250 each. Two cycles fit in a 30-day season (plant day 0, harvest
-day 10, replant, harvest day 20), after which those tiles switch to wheat.
+Strawberry looks like it should work -- four shops of demand, and it trades
+around $240 -- but it is deliberately left at zero. Its seed costs $100, ten
+times wheat, and it ties a tile up for seventeen days to yield four units
+unfertilized. Every allocation tried, from 10 tiles to 34, cost $45k or more
+against simply growing wheat there. Recorded rather than silently dropped,
+because the theory is sound and the execution is not.
 
-Labour is allocated by marginal value rather than by a fixed priority order.
-Every possible job is priced in coins -- watering a melon inside its bonus
-window really is worth ~$250, while watering wheat is worth ~$45 -- and each
-unit takes the job with the best value per action, counting the walk to get
-there. Deadline jobs (feeding, saving a plant that dies tonight) gain urgency
-as the day runs out so they are never crowded out by richer but deferrable work.
+Labour is allocated by marginal value rather than a fixed priority order. Every
+possible job is priced in coins -- watering a melon inside its bonus window is
+worth ~$250, watering wheat ~$45 -- and each unit takes the job with the best
+value per action, counting the walk to get there. Deadline jobs (feeding,
+saving a plant that dies tonight) gain urgency as the day runs out so they are
+never crowded out by richer but deferrable work.
 """
 
 import math
@@ -73,12 +76,12 @@ MARKET_I0 = 10000
 # one cow ~$2.9k of milk on $400. `target` is where the marginal animal stops
 # paying for its tile and its ~4 actions a day.
 ANIMALS = {
-    "GOOSE": {"cost": 300, "structure": "COOP",    "product": "EGG",  "first": 4, "target": 8},
-    "SHEEP": {"cost": 500, "structure": "PASTURE", "product": "WOOL", "first": 6, "target": 2},
-    "COW":   {"cost": 400, "structure": "PASTURE", "product": "MILK", "first": 8, "target": 0},
+    "COW":   {"cost": 400, "structure": "PASTURE", "product": "MILK", "first": 8, "target": 8},
+    "SHEEP": {"cost": 500, "structure": "PASTURE", "product": "WOOL", "first": 6, "target": 6},
+    "GOOSE": {"cost": 300, "structure": "COOP",    "product": "EGG",  "first": 4, "target": 0},
 }
 # Most valuable per animal first, so a labour-limited farm buys the best ones.
-ANIMAL_ORDER = ("SHEEP", "GOOSE", "COW")
+ANIMAL_ORDER = ("COW", "SHEEP", "GOOSE")
 STRUCTURES = ("COOP", "PASTURE")
 BUILD_OP = {"COOP": "BUILD_COOP", "PASTURE": "BUILD_PASTURE"}
 
@@ -131,14 +134,26 @@ LAST_DAY = 29
 # Cutoffs expressed as days before the end of the season, so they stay correct
 # if the episode length changes. At the default 720 steps these resolve to the
 # tuned values: melon 19, wheat 24, carrot 25, goose 22, feed 28, care 27.
-MELON_PLANT_CUTOFF = 10     # melon needs 10 days from planting to first yield
 WHEAT_PLANT_CUTOFF = 5
 CARROT_PLANT_CUTOFF = 4
 ANIMAL_BUY_MARGIN = 3       # productive days an animal must still have left
 FEED_CUTOFF = 1             # production at end of the penultimate day still sells
 CARE_CUTOFF = 2
 
-MELON_TILES = 22
+# Tile budget for the high-value crops, in planting priority order. Melon is
+# capped hard despite its $250 base: it is the ONLY product no town shop
+# demands, so the town centre alone drains it (~140 units a season) and a
+# melon-heavy farm simply floods its own market. Strawberry is demanded by four
+# shops (~536 units of drain), which holds its price above base all season.
+PREMIUM_ORDER = ("MELON", "STRAWBERRY")
+CROP_TILES = {"MELON": 22, "STRAWBERRY": 0}
+CROP_PLANT_CUTOFF = {"STRAWBERRY": 10, "MELON": 10}
+CROP_MIN_PRICE = {"STRAWBERRY": 60, "MELON": 110}
+# Cash that must remain after buying a seed. Strawberry seed is $100 -- ten
+# times wheat -- so an unguarded field of it starves the farm of the hands and
+# feed that keep everything else alive.
+CROP_MIN_CASH = {"STRAWBERRY": 1400, "MELON": 60}
+
 MAX_HANDS = 14
 HIRES_PER_TURN = 5
 
@@ -246,7 +261,6 @@ def _plan(obs, cfg=None):
     episode_steps = max(1, int(G(cfg, "episodeSteps", (LAST_DAY + 1) * TURNS_PER_DAY)
                                or (LAST_DAY + 1) * TURNS_PER_DAY))
     last_day = max(1, episode_steps // turns_per_day - 1)
-    melon_cutoff = last_day - MELON_PLANT_CUTOFF
     wheat_cutoff = last_day - WHEAT_PLANT_CUTOFF
     carrot_cutoff = last_day - CARROT_PLANT_CUTOFF
     def animal_cutoff(a):
@@ -266,7 +280,7 @@ def _plan(obs, cfg=None):
     plants, animals, weeds, empties = [], [], [], []
     free_struct = {s: [] for s in STRUCTURES}
     n_struct = {s: 0 for s in STRUCTURES}
-    melon_tiles = 0
+    crop_counts = {}
     for y in range(board):
         row = tiles[y]
         for x in range(board):
@@ -281,8 +295,8 @@ def _plan(obs, cfg=None):
                 weeds.append((x, y))
             elif kind == "PLANT":
                 plants.append((x, y, t))
-                if t.get("crop") == "MELON":
-                    melon_tiles += 1
+                c = t.get("crop")
+                crop_counts[c] = crop_counts.get(c, 0) + 1
             elif kind in STRUCTURES:
                 n_struct[kind] += 1
                 if t.get("animal"):
@@ -354,27 +368,36 @@ def _plan(obs, cfg=None):
     rest = rest[:max(0, capacity)]
 
     cash = money
-    want_melon = 0
-    # The market is shared, so an opponent dumping melons can flatten the price
-    # before ours ripen. Below this the tile is worth more under wheat.
-    if day <= melon_cutoff and px("MELON") >= 110:
-        want_melon = max(0, MELON_TILES - melon_tiles)
-        # Only buy seed for what the crew can actually get into the ground in
-        # the next day or so. Buying the whole melon field up front drains the
-        # bank on day 0 and leaves nothing for hands or feed.
-        want_melon = min(want_melon, len(rest), max(2, crew * 2),
-                         max(0, int((cash - MELON_BUFFER) // CROPS["MELON"]["seed"])))
-    melon_slots = rest[len(rest) - want_melon:] if want_melon > 0 else []
-    filler_slots = rest[:len(rest) - want_melon]
+    plant_plan, avail = [], list(rest)
+    for crop in PREMIUM_ORDER:
+        if not avail:
+            break
+        # The market is shared, so an opponent dumping can flatten a price
+        # before ours ripen; below that the tile is worth more under wheat.
+        if day > last_day - CROP_PLANT_CUTOFF[crop] or px(crop) < CROP_MIN_PRICE[crop]:
+            continue
+        want = max(0, CROP_TILES[crop] - crop_counts.get(crop, 0))
+        # Only buy seed for what the crew can get into the ground in the next
+        # day or so. Buying a whole field up front drains the bank on day 0 and
+        # leaves nothing for hands or feed.
+        want = min(want, len(avail), max(2, crew * 2),
+                   max(0, int((cash - CROP_MIN_CASH[crop]) // CROPS[crop]["seed"])))
+        if want <= 0:
+            continue
+        plant_plan += [(x, y, crop) for (x, y) in avail[len(avail) - want:]]
+        avail = avail[:len(avail) - want]
 
-    plant_plan = [(x, y, "MELON") for (x, y) in melon_slots]
     if day <= wheat_cutoff:
-        plant_plan += [(x, y, "WHEAT") for (x, y) in filler_slots]
+        plant_plan += [(x, y, "WHEAT") for (x, y) in avail]
     elif day <= carrot_cutoff:
-        plant_plan += [(x, y, "CARROT") for (x, y) in filler_slots]
+        plant_plan += [(x, y, "CARROT") for (x, y) in avail]
 
     # Wheat held back to feed the flock rather than sold.
     feed_reserve = 0 if endgame else n_animals * (2 if day < feed_cutoff else 1)
+    # Fertiliser is worth ~$70 sold, but doubling a strawberry production is
+    # worth ~$210, so keep enough on hand for the ongoing crops we run.
+    ongoing_tiles = sum(n for c, n in crop_counts.items() if CROPS.get(c, {}).get("ongoing"))
+    fert_reserve = 0 if endgame else min(30, ongoing_tiles)
 
     # ---- market orders ----------------------------------------------------
     orders = []
@@ -384,6 +407,8 @@ def _plan(obs, cfg=None):
         have = shed.get(item, 0)
         if item == "WHEAT":
             have -= feed_reserve
+        elif item == "FERTILIZER":
+            have -= fert_reserve
         if have <= 0:
             continue
         base = MARKET_PARAMS[item]["base"]
@@ -465,7 +490,7 @@ def _plan(obs, cfg=None):
     want_seed = {}
     for _, _, crop in plant_plan:
         want_seed[crop] = want_seed.get(crop, 0) + 1
-    for crop in ("MELON", "WHEAT", "CARROT"):
+    for crop in ("STRAWBERRY", "MELON", "WHEAT", "CARROT"):
         need = want_seed.get(crop, 0) - seeds.get(crop, 0)
         if need <= 0:
             continue
@@ -517,6 +542,15 @@ def _plan(obs, cfg=None):
             lose = max(yu, cd["max_yield"] - 2)
             add(lose * price * 0.6 * urgency, (x, y), ["WATER"])
             continue
+        # Ongoing crops double a scheduled production when fertilised AND
+        # watered that day. One application covers three days, so it usually
+        # catches two productions -- worth far more than selling the unit.
+        if cd["ongoing"] and t.get("fertilized_until_day", -1) < day:
+            ds = (day + 1) - t.get("planted_day", day) - cd["first"]
+            if (ds >= 0 and ds % cd["interval"] == 0
+                    and ds // cd["interval"] + 1 <= cd["max_yield"]):
+                add(price * 0.8, (x, y), ["FERTILIZE"], need="FERTILIZER")
+
         window_start = (cd["max_day"] + 1) // 2
         if (not cd["ongoing"]) and window_start <= age <= cd["max_day"] and yu < cd["max_yield"]:
             add(price, (x, y), ["WATER"])          # one extra unit at harvest
@@ -566,7 +600,9 @@ def _plan(obs, cfg=None):
         carry = sum(invs[i].values())
         if carry <= 0:
             continue
-        keep = invs[i].get("WHEAT", 0) + invs[i].get("GOOSE", 0)
+        keep = invs[i].get("WHEAT", 0) + sum(invs[i].get(a, 0) for a in ANIMALS)
+        if fert_reserve > 0:
+            keep += min(invs[i].get("FERTILIZER", 0), 3)
         droppable = carry - keep
         must = endgame and hour >= 14
         if droppable >= DROP_CARRY or must or (hour >= turns_per_day - 2 and shed_load < 60):
@@ -601,6 +637,7 @@ def _plan(obs, cfg=None):
         gap = min(shed.get(a, 0), len(free_struct[ad["structure"]])) - carried[a]
         if gap > 0:
             dispatch_pickup(a, gap, 2)
+
 
     # Greedy over value per action: a job worth V that costs d steps to walk to
     # plus one step to perform yields V / (1 + d) per action spent.

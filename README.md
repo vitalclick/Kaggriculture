@@ -13,24 +13,30 @@ The plan falls out of the market's revenue curves. Selling `N` units of a
 product earns `sum(price(k)) for k in 0..N-1`, and each product saturates at a
 very different point:
 
-| Product | 100 units | 300 units | Character |
-| --- | --- | --- | --- |
-| Melon | $21.7k | $26.6k | Huge value, but crashes to the $1 floor past ~150 |
-| Fertilizer | $9.0k | $21.0k | Free byproduct of livestock |
-| Egg | $4.4k | $12.6k | Very flat curve, large capacity |
-| Wheat | $2.2k | $6.3k | Effectively unlimited; also animal feed |
-| Wool | — | — | Dead past ~50 units, but the first 23 average ~$190 |
-| Strawberry / milk | — | — | Collapse inside ~50 units |
+Selling pushes a price down, but the town drains inventory every turn and pulls
+it back up. Only the net matters, and **town demand is the bigger term**:
 
-So the farm grows **melons** for raw value, keeps a small flock of **geese**
-for eggs and fertilizer, runs exactly **two sheep**, and fills the remaining
-tiles with **wheat**, which doubles as feed. Strawberry and tomato are never
-planted — their markets are too thin to repay a tile.
+| Product | Shops | Town drain/season | Base | Trades at |
+| --- | --- | --- | --- | --- |
+| Wheat | 5 | ~635 | $25 | $35–51 |
+| Strawberry | 4 | ~536 | $120 | ~$240 |
+| Milk | 3 | ~437 | $160 | $210–280 |
+| Wool | 1 (×2) | ~338 | $200 | ~$245 |
+| Egg | 2 | ~338 | $50 | ~$50 |
+| **Melon** | **0** | **~140** | $250 | falls as you sell |
+| Fertilizer | 0 | 0 | $100 | free from livestock |
 
-A thin market is not a worthless one. Wool is finished as a commodity past ~50
-units, but the first 23 sell at an average of ~$190, the best per-unit price in
-the game, so two sheep return ~$7.4k on a $1k outlay. Two is the entire
-opportunity — see the tuning notes.
+Melon is the only product **no shop demands** — the town centre alone touches
+it — so it is the one market a farm can genuinely flood. Its tile budget is
+therefore capped, not maximised.
+
+The farm grows **melons** up to that cap, **wheat** as filler that doubles as
+animal feed, and runs **8 cows + 6 sheep** on pasture for the premium goods.
+Cows and sheep beat geese decisively: per animal-day a cow returns ~$375 and a
+sheep ~$326 against a goose's ~$120, for the same ~4 actions of feeding, care
+and collection.
+
+**Strawberry is deliberately zero**, and that is a known gap — see below.
 
 Two details drive most of the score:
 
@@ -56,9 +62,13 @@ Measured over a fixed seed set with the default configuration:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 12W–0L | $91,109 (range $88.8k–$93.6k) |
-| `random` | 6W–0L | $89,846 |
+| `starter` | 12W–0L | $100,706 (range $91.9k–$105.2k) |
+| public trace agent | **0W–6L** | $63,397 vs their **$169,131** |
 | itself (self-play) | symmetric | ~$51k each |
+
+The trace agent is the honest benchmark: a public notebook replaying a strong
+submission's recorded actions. We lose to it every time. Beating `starter` by
+30x means little; the real bar is ~$170k.
 
 Self-play scores roughly halve because both farms drain the same market, which
 is the realistic ladder condition.
@@ -67,9 +77,13 @@ Tuning notes worth keeping, since several were counter-intuitive:
 
 - Goose target: 8 birds beat 12 (+$4.6k), 16 (+$14k) and 20. More geese eat
   labour that melons pay better for, and eggs/fertilizer saturate.
-- Sheep are worth +$11.8k, but *only* at exactly two. One is worth +$3k, three
-  is worth −$2k against no sheep at all, and the 2-vs-3 distributions do not
-  overlap across 12 seeds. Cows lose money at any count and are set to zero.
+- Cows + sheep instead of geese: +$7.5k. Milk and wool have shop demand behind
+  them and trade above base; eggs do not.
+- Strawberry costs $45k+ at every allocation tried (10, 22 and 34 tiles), even
+  though its market is four times deeper than melon's. Its $100 seed and
+  17-day, 4-unit cycle starve the farm of hands and feed. The top agent runs
+  ~39 strawberry tiles successfully, so this is an execution gap, not a
+  strategy one.
 - Planting into the final days *loses* money — those actions are worth more
   spent harvesting and collecting fertilizer.
 - An over-generous crew formula cost ~70% of the score by running into the
