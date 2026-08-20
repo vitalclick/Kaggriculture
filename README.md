@@ -62,9 +62,9 @@ Measured over a fixed seed set with the default configuration:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 12W–0L | $100,706 (range $91.9k–$105.2k) |
-| public trace agent | **0W–6L** | $63,397 vs their **$169,131** |
-| itself (self-play) | symmetric | ~$51k each |
+| `starter` | 12W–0L | $124,492 (range $116.5k–$132.1k) |
+| public trace agent | **0W–6L** | $75,636 vs their **$152,183** |
+| itself (self-play) | symmetric | ~$79k each |
 
 The trace agent is the honest benchmark: a public notebook replaying a strong
 submission's recorded actions. We lose to it every time. Beating `starter` by
@@ -79,11 +79,16 @@ Tuning notes worth keeping, since several were counter-intuitive:
   labour that melons pay better for, and eggs/fertilizer saturate.
 - Cows + sheep instead of geese: +$7.5k. Milk and wool have shop demand behind
   them and trade above base; eggs do not.
-- Strawberry costs $45k+ at every allocation tried (10, 22 and 34 tiles), even
-  though its market is four times deeper than melon's. Its $100 seed and
-  17-day, 4-unit cycle starve the farm of hands and feed. The top agent runs
-  ~39 strawberry tiles successfully, so this is an execution gap, not a
-  strategy one.
+- **Budget seed against the balance you will still have.** The crop planner
+  priced every crop against the same opening cash, so melon seed and livestock
+  were both "affordable" from one balance. Deducting as it allocates is worth
+  **+$23k** on its own — over-committing starved the farm of hands, and short
+  crews kill crops.
+- Strawberry still loses ~$25k at every allocation tried (10/18/22/34 tiles).
+  Instrumentation shows why: 83% of its tiles turn to weeds and they yield 0.83
+  units against a theoretical 4. An ongoing crop needs water every day for 17
+  days; a one-time crop tolerates gaps. The top agent runs ~39 strawberry tiles
+  successfully, so this remains an execution gap in the planner.
 - Planting into the final days *loses* money — those actions are worth more
   spent harvesting and collecting fertilizer.
 - An over-generous crew formula cost ~70% of the score by running into the

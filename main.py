@@ -30,12 +30,15 @@ refresh regardless of CARE, so each one yields a free fertilizer daily on top
 of its product. A goose that misses two consecutive feeds escapes and takes its
 purchase price with it, so feeding is never allowed to slip.
 
-Strawberry looks like it should work -- four shops of demand, and it trades
-around $240 -- but it is deliberately left at zero. Its seed costs $100, ten
-times wheat, and it ties a tile up for seventeen days to yield four units
-unfertilized. Every allocation tried, from 10 tiles to 34, cost $45k or more
-against simply growing wheat there. Recorded rather than silently dropped,
-because the theory is sound and the execution is not.
+Strawberry should work on paper: four shops demand it, ~536 units of drain a
+season, and it trades near $240. It is nonetheless set to zero, and the reason
+is measured rather than assumed. Instrumenting the tiles showed 83% of them
+turning to weeds and yielding 0.83 units against a theoretical 4, because an
+ongoing crop needs watering every day for seventeen days while a one-time crop
+tolerates gaps. This planner cannot keep that many tiles alive alongside the
+livestock, and every allocation tried -- 10, 18, 22, 34 tiles -- cost $25k or
+more against simply growing wheat there. The code path is kept and correct; the
+tile budget is the thing set to zero.
 
 Labour is allocated by marginal value rather than a fixed priority order. Every
 possible job is priced in coins -- watering a melon inside its bonus window is
@@ -152,7 +155,7 @@ CROP_MIN_PRICE = {"STRAWBERRY": 60, "MELON": 110}
 # Cash that must remain after buying a seed. Strawberry seed is $100 -- ten
 # times wheat -- so an unguarded field of it starves the farm of the hands and
 # feed that keep everything else alive.
-CROP_MIN_CASH = {"STRAWBERRY": 1400, "MELON": 60}
+CROP_MIN_CASH = {"STRAWBERRY": 400, "MELON": 60}
 
 MAX_HANDS = 14
 HIRES_PER_TURN = 5
@@ -386,6 +389,7 @@ def _plan(obs, cfg=None):
             continue
         plant_plan += [(x, y, crop) for (x, y) in avail[len(avail) - want:]]
         avail = avail[:len(avail) - want]
+        cash -= want * CROPS[crop]["seed"]   # later crops budget on what is left
 
     if day <= wheat_cutoff:
         plant_plan += [(x, y, "WHEAT") for (x, y) in avail]
@@ -533,7 +537,13 @@ def _plan(obs, cfg=None):
         if ready and yu > 0:
             # Harvesting also frees the tile for the next planting.
             add(yu * price + 40, (x, y), ["HARVEST"])
-            continue
+            # A one-time crop vanishes when harvested, so nothing else applies.
+            # An ongoing crop stays in the ground and still needs watering --
+            # and once it is old enough to bear, it is *always* holding fruit,
+            # so skipping the rest here left strawberries to die of thirst the
+            # very day they started producing, and meant FERTILIZE never ran.
+            if not cd["ongoing"]:
+                continue
 
         if endgame or watered:
             continue
@@ -554,6 +564,15 @@ def _plan(obs, cfg=None):
         window_start = (cd["max_day"] + 1) // 2
         if (not cd["ongoing"]) and window_start <= age <= cd["max_day"] and yu < cd["max_yield"]:
             add(price, (x, y), ["WATER"])          # one extra unit at harvest
+        elif cd["ongoing"]:
+            # An ongoing crop is a standing asset worth every production still
+            # to come, not a one-day bonus. Valuing its watering as a flat
+            # rounding error left 78% of strawberry tiles dying of thirst.
+            done = 0
+            if age >= cd["first"]:
+                done = (age - cd["first"]) // cd["interval"] + 1
+            left = max(0, cd["max_yield"] - done)
+            add(max(price * 0.12, left * price * 0.22), (x, y), ["WATER"])
         else:
             add(price * 0.12, (x, y), ["WATER"])   # insurance against tomorrow
 
