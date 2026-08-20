@@ -62,9 +62,9 @@ Measured over a fixed seed set with the default configuration:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 12W–0L | $124,492 (range $116.5k–$132.1k) |
-| public trace agent | **0W–6L** | $75,636 vs their **$152,183** |
-| itself (self-play) | symmetric | ~$79k each |
+| `starter` | 12W–0L | $132,011 (range $123.3k–$137.6k) |
+| public trace agent | **0W–6L** | $85,863 vs their **$144,320** |
+| itself (self-play) | symmetric | ~$72k each |
 
 The trace agent is the honest benchmark: a public notebook replaying a strong
 submission's recorded actions. We lose to it every time. Beating `starter` by
@@ -79,6 +79,13 @@ Tuning notes worth keeping, since several were counter-intuitive:
   labour that melons pay better for, and eggs/fertilizer saturate.
 - Cows + sheep instead of geese: +$7.5k. Milk and wool have shop demand behind
   them and trade above base; eggs do not.
+- **Weight travel, do not partition.** Assigning each unit its own region of
+  the farm sounds right and measures terribly: per-turn clustering, a fixed
+  grid, and day-frozen clusters came in $53k–$68k *below* the global router.
+  Work is bursty, so a fixed patch idles a hand whose ground is quiet while a
+  ripening block next door goes unpicked. Scoring jobs as `V / (1+d)**1.75`
+  instead gets the locality without the rigidity: movement fell 64% → 59% and
+  it is worth **+$7.5k**.
 - **Budget seed against the balance you will still have.** The crop planner
   priced every crop against the same opening cash, so melon seed and livestock
   were both "affordable" from one balance. Deducting as it allocates is worth
