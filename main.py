@@ -1,5 +1,14 @@
 """Kaggriculture competition agent.
 
+Targets kaggle-environments 1.32.7. The engine was rebalanced after 1.32.3 and
+the changes matter: carrot, tomato and egg moved to a "hinge" scarcity curve
+that runs away quadratically past its anchor, the town centre's pull dropped
+from a 1x/2x/4x schedule every 12 turns to a flat 1 every 24, and town shops are
+now drawn WITH REPLACEMENT, so a season can open three bakeries and no yarn
+store. The last of those makes results genuinely noisy -- scores on a fixed
+opponent range from $56k to $129k across seeds -- so nothing here is tuned on
+fewer than 20 seeds.
+
 Strategy is driven by the market, but the market has two forces, not one.
 Selling N units earns sum(price(k)) and pushes the price down; meanwhile the
 town drains inventory every turn and pulls it back up. Only the net matters,
@@ -94,20 +103,22 @@ ANIMAL_ORDER = ("COW", "SHEEP", "GOOSE")
 STRUCTURES = ("COOP", "PASTURE")
 BUILD_OP = {"COOP": "BUILD_COOP", "PASTURE": "BUILD_PASTURE"}
 
+HINGE_GAIN = 8.0
+
 MARKET_PARAMS = {
     "WHEAT":      {"base":  25, "T": 400, "bf": "sqrt",   "bt": 0.80, "af": "log",    "at": 0.20},
-    "CARROT":     {"base":  35, "T": 450, "bf": "log",    "bt": 0.20, "af": "sqrt",   "at": 0.70},
-    "TOMATO":     {"base":  60, "T": 200, "bf": "linear", "bt": 0.40, "af": "sqrt",   "at": 0.60},
+    "CARROT":     {"base":  35, "T": 450, "bf": "hinge",  "bt": 1.00, "af": "sqrt",   "at": 0.70},
+    "TOMATO":     {"base":  60, "T": 200, "bf": "hinge",  "bt": 0.40, "af": "sqrt",   "at": 0.60},
     "STRAWBERRY": {"base": 120, "T": 100, "bf": "sqrt",   "bt": 0.70, "af": "linear", "at": 1.60},
     "MELON":      {"base": 250, "T": 300, "bf": "log",    "bt": 0.20, "af": "sq",     "at": 3.60},
-    "EGG":        {"base":  50, "T": 332, "bf": "linear", "bt": 0.40, "af": "log",    "at": 0.20},
+    "EGG":        {"base":  50, "T": 332, "bf": "hinge",  "bt": 0.40, "af": "log",    "at": 0.20},
     "MILK":       {"base": 160, "T": 122, "bf": "sqrt",   "bt": 0.60, "af": "linear", "at": 1.60},
     "WOOL":       {"base": 200, "T": 105, "bf": "log",    "bt": 0.20, "af": "sq",     "at": 3.20},
     "FERTILIZER": {"base": 100, "T": 200, "bf": "linear", "bt": 0.40, "af": "linear", "at": 0.40},
 }
 
 
-def _shape(func, x):
+def _shape(func, x, T=None):
     x = max(0.0, x)
     if func == "linear":
         return x
@@ -117,6 +128,11 @@ def _shape(func, x):
         return math.sqrt(x)
     if func == "log":
         return math.log(1.0 + x)
+    if func == "hinge":
+        if not T or T <= 0:
+            return x
+        u = x / T
+        return u + HINGE_GAIN * max(0.0, u - 1.0) ** 2
     return x
 
 
@@ -124,12 +140,13 @@ def market_price(item, inv):
     """Mirror of the engine's price curve, so we can price a sale before making it."""
     p = MARKET_PARAMS[item]
     base = p["base"]
+    T = p["T"]
     if inv < MARKET_I0:
-        amp = p["bt"] * base / _shape(p["bf"], p["T"])
-        price = base + amp * _shape(p["bf"], MARKET_I0 - inv)
+        amp = p["bt"] * base / _shape(p["bf"], T, T)
+        price = base + amp * _shape(p["bf"], MARKET_I0 - inv, T)
     else:
-        amp = p["at"] * base / _shape(p["af"], p["T"])
-        price = base - amp * _shape(p["af"], inv - MARKET_I0)
+        amp = p["at"] * base / _shape(p["af"], T, T)
+        price = base - amp * _shape(p["af"], inv - MARKET_I0, T)
     return max(1, int(round(price)))
 
 
@@ -162,6 +179,10 @@ CROP_MIN_PRICE = {"STRAWBERRY": 60, "MELON": 110}
 # times wheat -- so an unguarded field of it starves the farm of the hands and
 # feed that keep everything else alive.
 CROP_MIN_CASH = {"STRAWBERRY": 400, "MELON": 60}
+# Day before which a premium crop is not planted. Melon pays nothing until day
+# 10; a wheat tile returns ~4 units at ~$47 every four days from day 4. Running
+# wheat first and converting tiles as they are harvested funds the build-out.
+CROP_START_DAY = {"STRAWBERRY": 5, "MELON": 5}
 
 MAX_HANDS = 14
 HIRES_PER_TURN = 5
@@ -391,6 +412,8 @@ def _plan(obs, cfg=None):
             break
         # The market is shared, so an opponent dumping can flatten a price
         # before ours ripen; below that the tile is worth more under wheat.
+        if day < CROP_START_DAY.get(crop, 0):
+            continue
         if day > last_day - CROP_PLANT_CUTOFF[crop] or px(crop) < CROP_MIN_PRICE[crop]:
             continue
         want = max(0, CROP_TILES[crop] - crop_counts.get(crop, 0))

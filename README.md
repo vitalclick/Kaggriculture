@@ -62,9 +62,17 @@ Measured over a fixed seed set with the default configuration:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 12W–0L | $132,011 (range $123.3k–$137.6k) |
-| public trace agent | **0W–6L** | $85,863 vs their **$144,320** |
-| itself (self-play) | symmetric | ~$72k each |
+Measured on **kaggle-environments 1.32.7**, 20 seeds:
+
+| Opponent | Record | Our mean score |
+| --- | --- | --- |
+| `starter` | 20W–0L | $96,752 (range $56.8k–$129.4k) |
+| public trace agent | **0W–8L** | $68,151 vs their **$123,615** |
+
+Earlier figures in this repo's history (~$132k) were measured on 1.32.3 and do
+**not** carry over — the engine was rebalanced. Because shops are now drawn with
+replacement, per-seed variance is large: a 4-seed sweep suggested four separate
+"improvements" that all vanished or reversed at 12–20 seeds. Tune on 20+.
 
 The trace agent is the honest benchmark: a public notebook replaying a strong
 submission's recorded actions. We lose to it every time. Beating `starter` by
