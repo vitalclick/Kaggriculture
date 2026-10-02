@@ -58,10 +58,6 @@ they are never crowded out by richer but deferrable work.
 
 ## Results
 
-Measured over a fixed seed set with the default configuration:
-
-| Opponent | Record | Our mean score |
-| --- | --- | --- |
 Measured on **kaggle-environments 1.32.7**, 20 seeds:
 
 | Opponent | Record | Our mean score |
@@ -75,8 +71,8 @@ replacement, per-seed variance is large: a 4-seed sweep suggested four separate
 "improvements" that all vanished or reversed at 12–20 seeds. Tune on 20+.
 
 The trace agent is the honest benchmark: a public notebook replaying a strong
-submission's recorded actions. We lose to it every time. Beating `starter` by
-30x means little; the real bar is ~$170k.
+submission's recorded actions. We lose to it every time. Beating `starter`
+comfortably means little — on this engine the bar is ~$124k.
 
 Self-play scores roughly halve because both farms drain the same market, which
 is the realistic ladder condition.
@@ -134,6 +130,35 @@ the entry point that actually runs.
 
 ## Submitting
 
+Accept the rules once ("Join Competition" on the competition page) before the
+first submit, or the API rejects it.
+
+Kaggle now issues a single bearer token (`KGAT_…`) instead of the old
+`kaggle.json` key file, so authenticate one of these two ways:
+
 ```bash
-kaggle competitions submit kaggriculture -f main.py -m "melon + goose portfolio"
+pip install -U kaggle
+
+# Either: environment variable, nothing written to disk
+export KAGGLE_API_TOKEN=KGAT_your_token_here
+
+# Or: token file the client picks up automatically
+mkdir -p ~/.kaggle
+echo KGAT_your_token_here > ~/.kaggle/access_token
+chmod 600 ~/.kaggle/access_token
 ```
+
+Then from the repo root:
+
+```bash
+kaggle competitions submit kaggriculture -f main.py -m "melon + cows/sheep, env 1.32.7"
+kaggle competitions submissions kaggriculture      # submission status
+kaggle competitions leaderboard  kaggriculture -s  # standing
+```
+
+`main.py` is submitted on its own — it has no imports beyond the standard
+library, so there is nothing to bundle into a `tar.gz`.
+
+Limits are 5 submissions a day with the most recent 2 active. The token is a
+live credential: keep it out of the repo and out of screenshots, and regenerate
+it at kaggle.com/settings/api if it is ever exposed.
