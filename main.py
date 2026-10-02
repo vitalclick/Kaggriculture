@@ -76,13 +76,27 @@ import traceback
 # ceil(max_day / 2)), capped by max_yield. Wheat's max_yield of 6 is only
 # reachable with fertilizer, so valuing a wheat planting at 6 units overstates
 # it by half.
+# `interval` is the gap in days between an ongoing crop's scheduled productions
+# (0 for one-time crops, which never reschedule). It was missing here for a long
+# while, and because the only reader sits behind `agent()`'s crash guard, the
+# resulting KeyError silently turned whole turns into PASS instead of surfacing.
 CROPS = {
-    "WHEAT":      {"seed": 10,  "first": 2,  "max_day": 4,  "max_yield": 6, "exp": 4, "ongoing": False},
-    "CARROT":     {"seed": 20,  "first": 2,  "max_day": 3,  "max_yield": 4, "exp": 3, "ongoing": False},
-    "TOMATO":     {"seed": 50,  "first": 8,  "max_day": 8,  "max_yield": 4, "exp": 4, "ongoing": True},
-    "STRAWBERRY": {"seed": 100, "first": 10, "max_day": 10, "max_yield": 4, "exp": 4, "ongoing": True},
-    "MELON":      {"seed": 80,  "first": 10, "max_day": 12, "max_yield": 6, "exp": 6, "ongoing": False},
+    "WHEAT":      {"seed": 10,  "first": 2,  "max_day": 4,  "max_yield": 6, "exp": 4, "interval": 0, "ongoing": False},
+    "CARROT":     {"seed": 20,  "first": 2,  "max_day": 3,  "max_yield": 4, "exp": 3, "interval": 0, "ongoing": False},
+    "TOMATO":     {"seed": 50,  "first": 8,  "max_day": 8,  "max_yield": 4, "exp": 4, "interval": 1, "ongoing": True},
+    "STRAWBERRY": {"seed": 100, "first": 10, "max_day": 10, "max_yield": 4, "exp": 4, "interval": 2, "ongoing": True},
+    "MELON":      {"seed": 80,  "first": 10, "max_day": 12, "max_yield": 6, "exp": 6, "interval": 0, "ongoing": False},
 }
+
+# Fail at import rather than at runtime if the tables above lose a field. The
+# planner runs inside agent()'s crash guard, so a missing key does not surface
+# as an error -- it quietly turns the whole turn into PASS. A missing "interval"
+# did exactly that for an entire tuning cycle, costing ~$36k a game while every
+# test still reported a clean run.
+for _c, _d in CROPS.items():
+    _missing = {"seed", "first", "max_day", "max_yield", "exp", "interval",
+                "ongoing"} - set(_d)
+    assert not _missing, "CROPS[%s] missing %s" % (_c, sorted(_missing))
 
 PRODUCTS = ["WHEAT", "CARROT", "TOMATO", "STRAWBERRY", "MELON", "EGG", "MILK", "WOOL", "FERTILIZER"]
 
@@ -171,18 +185,23 @@ CARE_CUTOFF = 2
 # demands, so the town centre alone drains it (~140 units a season) and a
 # melon-heavy farm simply floods its own market. Strawberry is demanded by four
 # shops (~536 units of drain), which holds its price above base all season.
+# Candidate crops with a per-crop tile cap. Which of them actually gets planted
+# is decided each turn from live prices, not from this order: against a rival
+# farming the same things, melon and milk collapse to $1 while tomato sits at
+# $247 and carrot at $85 because nobody is supplying them. A fixed recipe keeps
+# planting into the glut it is itself creating.
 PREMIUM_ORDER = ("MELON", "STRAWBERRY")
-CROP_TILES = {"MELON": 22, "STRAWBERRY": 0}
-CROP_PLANT_CUTOFF = {"STRAWBERRY": 10, "MELON": 10}
-CROP_MIN_PRICE = {"STRAWBERRY": 60, "MELON": 110}
+CROP_TILES = {"MELON": 22, "STRAWBERRY": 18}
+CROP_PLANT_CUTOFF = {"STRAWBERRY": 10, "MELON": 10, "TOMATO": 11, "CARROT": 4}
+CROP_MIN_PRICE = {"STRAWBERRY": 60, "MELON": 110, "TOMATO": 55, "CARROT": 30}
 # Cash that must remain after buying a seed. Strawberry seed is $100 -- ten
 # times wheat -- so an unguarded field of it starves the farm of the hands and
 # feed that keep everything else alive.
-CROP_MIN_CASH = {"STRAWBERRY": 400, "MELON": 60}
+CROP_MIN_CASH = {"STRAWBERRY": 400, "MELON": 60, "TOMATO": 250, "CARROT": 60}
 # Day before which a premium crop is not planted. Melon pays nothing until day
 # 10; a wheat tile returns ~4 units at ~$47 every four days from day 4. Running
 # wheat first and converting tiles as they are harvested funds the build-out.
-CROP_START_DAY = {"STRAWBERRY": 5, "MELON": 5}
+CROP_START_DAY = {"STRAWBERRY": 5, "MELON": 5, "TOMATO": 5, "CARROT": 5}
 
 MAX_HANDS = 14
 HIRES_PER_TURN = 5
@@ -222,6 +241,11 @@ SELL_FLOOR_FRAC = {
 # neighbourhood without ever being *forbidden* to cross the farm for something
 # genuinely valuable, which is what makes this beat a hard region partition.
 TRAVEL_PENALTY = 1.75
+
+# A fertilise application doubles a scheduled production and its three-day
+# window usually catches the next one, so it is worth roughly two units of the
+# crop -- against ~$100 for selling the fertilizer instead.
+FERTILIZE_VALUE = 1.6
 
 SHED_PRESSURE = 55          # above this many items, sell regardless of the floor
 DROP_CARRY = 7              # inventory size that triggers a trip to the shed
@@ -407,6 +431,16 @@ def _plan(obs, cfg=None):
 
     cash = money
     plant_plan, avail = [], list(rest)
+
+    def tile_rate(crop):
+        """Coins a tile earns per day it is occupied, at today's price."""
+        cd = CROPS[crop]
+        if cd["ongoing"]:
+            days = cd["first"] + cd["interval"] * cd["max_yield"] + 2
+        else:
+            days = cd["max_day"] + 2
+        return cd["exp"] * px(crop) / float(days)
+
     for crop in PREMIUM_ORDER:
         if not avail:
             break
@@ -582,21 +616,30 @@ def _plan(obs, cfg=None):
             if not cd["ongoing"]:
                 continue
 
-        if endgame or watered:
+        if endgame:
+            continue
+
+        # Fertilising is offered independently of watering. It used to sit below
+        # the "already watered, nothing to do" guard, which made it unreachable:
+        # the crop gets watered early (watering is valuable), and after that the
+        # tile returned no fertilise job at all -- 0 of 32 tiles were ever
+        # fertilised. The bonus needs the plant watered the same day anyway, so
+        # the two jobs belong side by side, not in sequence.
+        if cd["ongoing"] and t.get("fertilized_until_day", -1) < day:
+            ds = (day + 1) - t.get("planted_day", day) - cd["first"]
+            if (ds >= 0 and ds % cd["interval"] == 0
+                    and ds // cd["interval"] + 1 <= cd["max_yield"]):
+                # Doubles this production, and the three-day window usually
+                # catches the next one too.
+                add(price * FERTILIZE_VALUE, (x, y), ["FERTILIZE"], need="FERTILIZER")
+
+        if watered:
             continue
         if t.get("consecutive_unwatered", 0) >= 1:
             # Dies tonight: the loss is the whole rest of the plant.
             lose = max(yu, cd["max_yield"] - 2)
             add(lose * price * 0.6 * urgency, (x, y), ["WATER"])
             continue
-        # Ongoing crops double a scheduled production when fertilised AND
-        # watered that day. One application covers three days, so it usually
-        # catches two productions -- worth far more than selling the unit.
-        if cd["ongoing"] and t.get("fertilized_until_day", -1) < day:
-            ds = (day + 1) - t.get("planted_day", day) - cd["first"]
-            if (ds >= 0 and ds % cd["interval"] == 0
-                    and ds // cd["interval"] + 1 <= cd["max_yield"]):
-                add(price * 0.8, (x, y), ["FERTILIZE"], need="FERTILIZER")
 
         window_start = (cd["max_day"] + 1) // 2
         if (not cd["ongoing"]) and window_start <= age <= cd["max_day"] and yu < cd["max_yield"]:

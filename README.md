@@ -62,8 +62,8 @@ Measured on **kaggle-environments 1.32.7**, 20 seeds:
 
 | Opponent | Record | Our mean score |
 | --- | --- | --- |
-| `starter` | 20W–0L | $96,752 (range $56.8k–$129.4k) |
-| public trace agent | **0W–8L** | $68,151 vs their **$123,615** |
+| `starter` | 20W–0L | $109,519 (range $65.9k–$143.0k) |
+| public trace agent | **0W–16L** | $65,242 vs their **$116,832** |
 
 Earlier figures in this repo's history (~$132k) were measured on 1.32.3 and do
 **not** carry over — the engine was rebalanced. Because shops are now drawn with
@@ -95,11 +95,17 @@ Tuning notes worth keeping, since several were counter-intuitive:
   were both "affordable" from one balance. Deducting as it allocates is worth
   **+$23k** on its own — over-committing starved the farm of hands, and short
   crews kill crops.
-- Strawberry still loses ~$25k at every allocation tried (10/18/22/34 tiles).
-  Instrumentation shows why: 83% of its tiles turn to weeds and they yield 0.83
-  units against a theoretical 4. An ongoing crop needs water every day for 17
-  days; a one-time crop tolerates gaps. The top agent runs ~39 strawberry tiles
-  successfully, so this remains an execution gap in the planner.
+- **Strawberry now pays** (18 tiles, +$14k) — but only after a missing
+  `interval` key in `CROPS` was fixed. The lookup sits inside `agent()`'s crash
+  guard, so the `KeyError` never surfaced: it silently turned whole turns into
+  `PASS`. Strawberry had been written off three times on the strength of
+  measurements taken while the agent was passing. Yield went 2.88 → 4.94 units
+  per tile and fertilising started working at all. A table-completeness
+  assertion now fails at import instead.
+- Crop choice ranked by live price-per-tile-day *loses* (−$6k): early prices sit
+  near base, so it picks the same crop anyway and re-sorts every turn.
+- Valuing `COLLECT_FERTILIZER` by its use on crops rather than its sale price
+  also loses (−$8k vs the trace agent) — it outbids better work.
 - Planting into the final days *loses* money — those actions are worth more
   spent harvesting and collecting fertilizer.
 - An over-generous crew formula cost ~70% of the score by running into the
