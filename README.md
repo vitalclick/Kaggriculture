@@ -142,6 +142,8 @@ first submit, or the API rejects it.
 Kaggle now issues a single bearer token (`KGAT_…`) instead of the old
 `kaggle.json` key file, so authenticate one of these two ways:
 
+macOS / Linux:
+
 ```bash
 pip install -U kaggle
 
@@ -153,6 +155,26 @@ mkdir -p ~/.kaggle
 echo KGAT_your_token_here > ~/.kaggle/access_token
 chmod 600 ~/.kaggle/access_token
 ```
+
+Windows (`cmd.exe`):
+
+```bat
+pip install -U kaggle
+
+REM Either: this session only
+set KAGGLE_API_TOKEN=KGAT_your_token_here
+
+REM Or: persist it (reopen the terminal afterwards)
+setx KAGGLE_API_TOKEN "KGAT_your_token_here"
+
+REM Or: the token file. Note there is NO space before the ">" -- cmd would
+REM otherwise write a trailing space into the file and authentication fails.
+mkdir "%USERPROFILE%\.kaggle"
+echo KGAT_your_token_here> "%USERPROFILE%\.kaggle\access_token"
+```
+
+Installing the client may warn that `awsebcli` wants older `six`/`urllib3`.
+That conflict does not involve the Kaggle client and can be ignored.
 
 Then from the repo root:
 
