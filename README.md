@@ -136,6 +136,17 @@ the entry point that actually runs.
 
 ## Submitting
 
+> **This competition is closed.** The final submission deadline was
+> 30 September 2026; 1–15 October was the leaderboard convergence window, during
+> which Kaggle only ran games between agents already submitted. The API now
+> answers `FAILED_PRECONDITION: Submissions have been disabled for this
+> competition`, and no client-side change affects that. Note that
+> `kaggle competitions list` reports the *evaluation* end date (14 October) in
+> its deadline column, which is easy to mistake for a submission deadline.
+>
+> The steps below are kept for the next simulation competition — the agent is
+> plain `main.py` with an `agent(obs, config)` entry point, so it ports directly.
+
 Accept the rules once ("Join Competition" on the competition page) before the
 first submit, or the API rejects it.
 
