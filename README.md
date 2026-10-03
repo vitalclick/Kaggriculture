@@ -173,6 +173,30 @@ mkdir "%USERPROFILE%\.kaggle"
 echo KGAT_your_token_here> "%USERPROFILE%\.kaggle\access_token"
 ```
 
+Windows (PowerShell) — **do not use `>` to write the token file**. PowerShell's
+`>` is `Out-File`, which on Windows PowerShell 5.1 writes UTF-16LE with a BOM;
+the client cannot read that, and the failure looks like a bad token rather than
+a bad file. Write it through .NET instead, which gives UTF-8 with no BOM and no
+trailing newline on every PowerShell version:
+
+```powershell
+pip install -U kaggle
+
+# Simplest: environment variable, nothing written to disk
+$env:KAGGLE_API_TOKEN = "KGAT_your_token_here"
+
+# Or persist it for future sessions
+[Environment]::SetEnvironmentVariable("KAGGLE_API_TOKEN", "KGAT_your_token_here", "User")
+
+# Or the token file, written with a safe encoding
+New-Item -ItemType Directory -Force "$HOME\.kaggle" | Out-Null
+[IO.File]::WriteAllText("$HOME\.kaggle\access_token", "KGAT_your_token_here")
+```
+
+To check an existing token file, `Format-Hex "$HOME\.kaggle\access_token"`:
+a leading `FF FE`, or `00` between every character, means it is UTF-16 and must
+be rewritten. `chmod` has no Windows equivalent and is not needed.
+
 Installing the client may warn that `awsebcli` wants older `six`/`urllib3`.
 That conflict does not involve the Kaggle client and can be ignored.
 
