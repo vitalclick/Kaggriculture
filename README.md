@@ -139,8 +139,19 @@ the entry point that actually runs.
 Accept the rules once ("Join Competition" on the competition page) before the
 first submit, or the API rejects it.
 
-Kaggle now issues a single bearer token (`KGAT_…`) instead of the old
-`kaggle.json` key file, so authenticate one of these two ways:
+The simplest way to authenticate is the CLI's own OAuth flow, which caches
+credentials locally and needs no token file at all — no encoding pitfalls, no
+secret on disk, nothing to rotate:
+
+```
+kaggle auth login
+```
+
+Otherwise Kaggle issues a single bearer token (`KGAT_…`) in place of the old
+`kaggle.json` key file. In the snippets below, `KGAT_your_token_here` is a
+placeholder: replace the whole quoted string with the real token, or you will
+write the placeholder itself to the file and the failure will read as an
+authentication error.
 
 macOS / Linux:
 
